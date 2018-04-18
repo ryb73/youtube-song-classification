@@ -1,6 +1,7 @@
 /* eslint-env node */
 
-const path              = require("path");
+const path                = require("path");
+const ConfigWebpackPlugin = require("config-webpack");
 
 function rel(relPath) {
     return path.resolve(__dirname, relPath);
@@ -10,7 +11,7 @@ module.exports = {
     mode: "development",
 
     entry: {
-        index: rel("js/index.js"),
+        index: [ "babel-polyfill", rel("js/index.js") ],
     },
 
     output: {
@@ -29,6 +30,10 @@ module.exports = {
             loader: "babel-loader?cacheDirectory=true"
         }]
     },
+
+    plugins: [
+        new ConfigWebpackPlugin()
+    ],
 
     devtool: "source-map",
 };

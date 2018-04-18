@@ -26,12 +26,18 @@ module.exports = {
         ],
 
         "no-unused-vars": [
-            "error",
+            "warn",
             { vars: "all", args: "none" }
         ],
 
         eqeqeq: [ "error", "always" ],
 
-        "no-console": 0
+        "no-console": "off",
+
+        "no-unreachable": "warn",
+
+        "react/prop-types": "off",
     },
+
+    globals: { CONFIG: true },
 };
