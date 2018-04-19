@@ -11,7 +11,7 @@ module.exports = {
     mode: "development",
 
     entry: {
-        index: [ "babel-polyfill", rel("js/index.js") ],
+        index: rel("js/index.js"),
     },
 
     output: {

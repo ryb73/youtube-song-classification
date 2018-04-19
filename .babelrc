@@ -1,4 +1,8 @@
 {
-    "presets": [ "react", "env" ],
-    "plugins": [ "syntax-async-functions" ],
+    "presets": [
+        "react",
+        [ "env", { "targets": {
+            "browsers": "last 2 Chrome versions"
+        }} ]
+    ],
 }

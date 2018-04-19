@@ -1,5 +1,6 @@
 import React from "react";
 import autobind from "class-autobind";
+import songIterator from "../song-iterator";
 
 export default class Main extends React.Component {
     constructor() {
@@ -38,7 +39,10 @@ export default class Main extends React.Component {
         e.preventDefault();
 
         let me = await this.props.spotify.getMe();
-        console.log("selected", await this.props.spotify.getPlaylistTracks(me.id, playlist.id));
+
+        this.props.onPlaylistPicked(
+            songIterator(this.props.spotify, me.id, playlist.id)
+        );
     }
 
     async loadPlaylists() {

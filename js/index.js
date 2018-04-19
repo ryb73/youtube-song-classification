@@ -17,6 +17,8 @@ async function main() {
         return;
     }
 
+    location.hash = "";
+
     let spotify = new Spotify();
     spotify.setAccessToken(accessToken);
 
