@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "watch": "webpack -w --progress"
+    "watch": "webpack -w --progress",
+    "start": "FLASK_APP=python/server.py pipenv run flask run",
+    "server-dbg": "FLASK_DEBUG=1 FLASK_APP=python/server.py pipenv run flask run"
   },
   "repository": {
     "type": "git",

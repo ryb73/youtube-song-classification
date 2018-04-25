@@ -1,0 +1,18 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+json-cfg = "==0.*"
+pip = "==9.*"
+flask = "==0.*"
+flask-cors = "*"
+firebase-admin = "*"
+rethinkdb = "*"
+
+[dev-packages]
+pylint = "*"
+
+[requires]
+python_version = "3.6"

@@ -2,7 +2,7 @@ import React      from "react";
 import ReactDOM   from "react-dom";
 import Spotify    from "spotify-web-api-js";
 import qs         from "qs";
-import Main       from "./components/Main";
+import Main       from "./components/main";
 
 async function main() {
     if(!location.hash) {

@@ -1,3 +1,5 @@
+import superagent from "superagent";
+
 export default function songIterator(spotify, userId, playlistId) {
     let trackBuffer = [];
     let offset = 0;
@@ -19,7 +21,16 @@ export default function songIterator(spotify, userId, playlistId) {
     };
 }
 
-function saveTrack(track) {
+function getApiUrlBase() {
+    let { secure, host, port } = CONFIG.api;
+    let protocol = secure ? "https" : "http";
+    return `${protocol}://${host}:${port}`;
+}
+
+async function saveTrack(track) {
+    await superagent.post(getApiUrlBase() + "/add-track/")
+        .send({ trackType: "spotify", track });
+
     return track.id;
 }
 
