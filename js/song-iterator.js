@@ -1,40 +1,44 @@
-import superagent from "superagent";
+import _ from "lodash";
+import { getTracksToProcess } from "./api-helper";
 
-export default function songIterator(spotify, userId, playlistId) {
+export default function songIterator(spotify, userId, playlist) {
     let trackBuffer = [];
-    let offset = 0;
-    const limit = 10;
+    const limit = 2;
+    let current = 0;
+
+    const totalTracks = playlist.tracks.total;
+    const playlistId = playlist.id;
+
+    let offsetQueue = generateOffsetQueue(totalTracks, limit);
 
     return async function() {
-        do {
-            if(trackBuffer.length < 1) {
-                let resp = await spotify.getPlaylistTracks(userId, playlistId, { limit, offset });
-                trackBuffer = resp.items;
-                if(resp.items.length < 1)
-                    return null;
+        if(trackBuffer.length < 1) {
+            let offset = offsetQueue.pop();
 
-                offset += limit;
-            }
-        } while(dropAlreadyProcessed(trackBuffer) < 1);
+            let { items } = await spotify.getPlaylistTracks(
+                userId, playlistId, { limit, offset }
+            );
+            if(items.length < 1)
+                return null;
 
-        return saveTrack(trackBuffer.shift().track);
+            let { searches, skipped } = await getTracksToProcess(_.map(items, "track"));
+            if(searches.length < 1)
+                return null;
+
+            trackBuffer = searches;
+            current += skipped;
+        }
+
+        ++current;
+        let { id, query } = trackBuffer.shift();
+
+        return { id, query, progress: { current, total: totalTracks } };
     };
 }
 
-function getApiUrlBase() {
-    let { secure, host, port } = CONFIG.api;
-    let protocol = secure ? "https" : "http";
-    return `${protocol}://${host}:${port}`;
-}
-
-async function saveTrack(track) {
-    await superagent.post(getApiUrlBase() + "/add-track/")
-        .send({ trackType: "spotify", track });
-
-    return track.id;
-}
-
-function dropAlreadyProcessed(tracks) {
-    // TODO: implement
-    return tracks.length;
+function generateOffsetQueue(totalTracks, pageSize) {
+    return _.shuffle(
+        new Array(Math.floor(totalTracks / pageSize)).fill(pageSize)
+            .map((v, i) => v * i)
+    );
 }

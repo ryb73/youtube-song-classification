@@ -22,11 +22,20 @@ async function main() {
     let spotify = new Spotify();
     spotify.setAccessToken(accessToken);
 
+    await loadGoogleApi();
+
     ReactDOM.render(<Main spotify={spotify} />, document.getElementById("container"));
+}
+
+function loadGoogleApi() {
+    return gapi.client.init({
+        "apiKey": CONFIG.youtube.apiKey,
+        "discoveryDocs": ["https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest"],
+    });
 }
 
 function getAccessCodeFromHash() {
     return qs.parse(location.hash.substring(1)).access_token;
 }
 
-main();
+gapi.load("client", main);

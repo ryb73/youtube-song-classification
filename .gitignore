@@ -39,6 +39,7 @@ node_modules
 
 # build output
 html/js
+html/css
 
 config/production.*
 config/local.*

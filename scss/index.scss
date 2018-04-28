@@ -1,0 +1,66 @@
+html, body, #container {
+    height: 100%;
+    background-color: #f7f9fc;
+}
+
+.song-test {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+
+    .progress {
+        float: right;
+    }
+
+    ul {
+        flex-grow: 1;
+        padding: 0;
+        overflow: auto;
+
+        li {
+            position: relative;
+            padding: 1em;
+            margin: 1em 0;
+            background-color: #eee;
+            list-style-type: none;
+            color: #666;
+            cursor: pointer;
+
+            > * {
+                cursor: initial;
+            }
+
+            &.toggled {
+                background-color: #ddd;
+            }
+
+            &.match {
+                $bg: #95dc8a;
+                background-color: $bg;
+
+                &.toggled {
+                    background-color: darken($bg, 10%);
+                }
+            }
+
+            h3 {
+                margin-top: 0;
+                width: 50%;
+            }
+
+            p {
+                width: 50%;
+            }
+
+            .selector {
+                position: absolute;
+                right: 1em;
+                top: 1em;
+
+                select, input {
+                    font-size: 1.3em;
+                }
+            }
+        }
+    }
+}

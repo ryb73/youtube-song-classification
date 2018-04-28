@@ -37,10 +37,8 @@ export default class PickPlaylist extends React.Component {
     async playlistSelected(playlist, e) {
         e.preventDefault();
 
-        let me = await this.props.spotify.getMe();
-
         this.props.onPlaylistPicked(
-            songIterator(this.props.spotify, me.id, playlist.id)
+            songIterator(this.props.spotify, playlist.owner.id, playlist)
         );
     }
 

@@ -1,5 +1,10 @@
 module.exports = {
-    extends: [ "eslint:recommended", "plugin:react/recommended" ],
+    extends: [
+        "eslint:recommended",
+        "plugin:react/recommended",
+        "plugin:import/errors",
+        "plugin:import/warnings",
+    ],
 
     env: {
         browser: true,
@@ -33,11 +38,14 @@ module.exports = {
         eqeqeq: [ "error", "always" ],
 
         "no-console": "off",
-
         "no-unreachable": "warn",
+        "no-debugger": "warn",
 
         "react/prop-types": "off",
     },
 
-    globals: { CONFIG: true },
+    globals: {
+        CONFIG: true,
+        gapi: true,
+    },
 };
