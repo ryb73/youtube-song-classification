@@ -10,9 +10,13 @@ flask = "==0.*"
 flask-cors = "*"
 firebase-admin = "*"
 rethinkdb = "*"
+pandas = "*"
+sklearn = "*"
+scipy = "*"
 
 [dev-packages]
 pylint = "*"
+pycodestyle = "*"
 
 [requires]
 python_version = "3.6"
