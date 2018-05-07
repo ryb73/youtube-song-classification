@@ -13,10 +13,12 @@ rethinkdb = "*"
 pandas = "*"
 sklearn = "*"
 scipy = "*"
+xgboost = "*"
 
 [dev-packages]
 pylint = "*"
 pycodestyle = "*"
+"beautifulsoup4" = "*"
 
 [requires]
 python_version = "3.6"
