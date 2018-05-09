@@ -19,6 +19,7 @@ xgboost = "*"
 pylint = "*"
 pycodestyle = "*"
 "beautifulsoup4" = "*"
+numexpr = "*"
 
 [requires]
 python_version = "3.6"

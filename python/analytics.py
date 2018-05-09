@@ -4,11 +4,15 @@ import os
 import pandas as pd
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import CountVectorizer
-from xgboost import XGBRegressor
+from xgboost import XGBClassifier
 from sklearn.preprocessing import Imputer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, cross_val_predict
+from sklearn.metrics import confusion_matrix, recall_score, precision_score, f1_score
+from sklearn.svm import LinearSVC
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import MultinomialNB
 
 fp = __file__
 
@@ -27,6 +31,7 @@ def get_data():
                 .eq_join(r.row["right"]["snippet"]["channelId"], r.table("youTubeChannels"))
                 .map(format_doc)
                 .run(db))
+
     data = [
         {**row,
          "ytChannelSubscriberCount": int(row["ytChannelSubscriberCount"]) if row["ytChannelSubscriberCount"] is not None else None,
@@ -37,26 +42,11 @@ def get_data():
          "ytFavoriteCount": int(row["ytFavoriteCount"]) if row["ytFavoriteCount"] is not None else None,
          "ytLikeCount": int(row["ytLikeCount"]) if row["ytLikeCount"] is not None else None,
          "ytViewCount": int(row["ytViewCount"]) if row["ytViewCount"] is not None else None,
+         "containsArtist": row["spotArtistName"] in (row["ytTitle"] + " " + row["ytDescription"]),
+         "containsAlbum": row["spotAlbumName"] in (row["ytTitle"] + " " + row["ytDescription"]),
+         "containsTrack": row["spotTrackName"] in (row["ytTitle"] + " " + row["ytDescription"]),
          } for row in data]
     return pd.DataFrame(data)
-
-
-def get_features(data):
-    # ideas
-    # ard distance from vid upload date
-    # y/m/d presensce in description
-    # spotify duration distance from vid dur
-    #
-    # essential
-    # album release date (ard) – clean year-only dates or drop date
-    # missing values
-    # categorize: ytCategoryId, ytDefinition
-
-    return []
-
-
-def get_labels(data):
-    return []
 
 
 def format_doc(doc):
@@ -100,33 +90,102 @@ def format_doc(doc):
         "videoId": video["id"]
     }
 
-data = get_data()
-data = data[(data.selection != "mashup") & (data.selection != "instrumental")]
-data.selection = data.selection.replace("lyricHD","LyricVideo")
-data.selection = data.selection.replace("proCover","cover")
-data.selection = data.selection.replace("drumCover","instrumentCover")
-data.selection = data.selection.replace("pianoCover","instrumentCover")
-data.selection = data.selection.replace("guitarCover","instrumentCover")
-data.selection = data.selection.replace("liveAcoustic","live")
-data.selection = data.selection.replace("liveAcousticHQ","liveInStudio")
-data = data.reset_index(drop=True)
-
-X = pd.get_dummies(data[[
-    "searchIndex", "spotExplicit", "spotDurationMs", "ytChannelSubscriberCount",
-    "ytChannelViewCount", "ytCommentCount", "ytDislikeCount", "ytFavoriteCount",
-    "ytLicensedContent", "ytLikeCount", "ytViewCount",
-    "ytDefinition", "ytCaption", "ytChannelId"
-]])
-
-y = pd.factorize(data.selection)[0]
-
-vectorizer = CountVectorizer(analyzer = "word",   \
+def create_vectorizer():
+    return CountVectorizer(analyzer = "word",   \
                             stop_words = "english",   \
-                            max_features = 1000)
+                            max_features = 1000,
+                            ngram_range=(1,2))
 
-bag = vectorizer.fit_transform(data.ytDescription)
-sdf = pd.SparseDataFrame(bag, columns=vectorizer.get_feature_names(), default_fill_value=0)
-X = pd.concat([X, sdf], axis=1)
 
-my_pipeline = make_pipeline(Imputer(), RandomForestClassifier())
-scores = cross_val_score(my_pipeline, X, y, scoring='accuracy')
+def get_scores(confusion, y, y_pred, y_factorization):
+    df = pd.DataFrame({
+        "recall": confusion.apply(lambda x: x[x.name] / x.sum(), axis=1),
+        "precision": confusion.apply(lambda x: x[x.name] / x.sum())
+    }).rename_axis(None)
+
+    df.index = [ y_factorization[1][x] for x in df.index ]
+
+    df.loc["totals"] = [
+        recall_score(y, y_pred, average="micro"),
+        precision_score(y, y_pred, average="micro"),
+    ]
+
+    return df
+
+def cross_validate(classifier, X, y, y_factorization):
+    print(classifier.__class__.__name__)
+
+    my_pipeline = make_pipeline(Imputer(), classifier)
+    y_pred = cross_val_predict(my_pipeline, X, y)
+
+    confusion = pd.DataFrame(confusion_matrix(y, y_pred))
+    confusion = confusion.rename_axis("actual", axis="rows").rename_axis("predicted", axis="columns")
+
+    scores = get_scores(confusion, y, y_pred, y_factorization)
+
+    print(confusion)
+    print(scores)
+    print()
+
+    return (confusion, scores)
+
+def main():
+    data = get_data()
+    data = data[(data.selection != "mashup") & (data.selection != "instrumental")]
+    data.selection = data.selection.replace("lyricHD","LyricVideo")
+    data.selection = data.selection.replace("proCover","cover")
+    data.selection = data.selection.replace("drumCover","instrumentCover")
+    data.selection = data.selection.replace("pianoCover","instrumentCover")
+    data.selection = data.selection.replace("guitarCover","instrumentCover")
+    data.selection = data.selection.replace("liveAcoustic","live")
+    data.selection = data.selection.replace("liveAcousticHQ","liveInStudio")
+    data.selection = data.selection.replace("cover","alternate")
+    data.selection = data.selection.replace("instrumentCover","related")
+    data.selection = data.selection.replace("remix","alternate")
+    data.selection = data.selection.replace("acoustic","alternate")
+    data.selection = data.selection.replace("liveAudio","live")
+    data.selection = data.selection.replace("liveHD","live")
+    data.selection = data.selection.replace("live","alternate")
+    data.selection = data.selection.replace("liveInStudio","alternate")
+    data.selection = data.selection.replace("LyricVideo","exact")
+    data.selection = data.selection.replace("audioOnly","exact")
+    data.selection = data.selection.replace("fanVideo","exact")
+    data.selection = data.selection.replace("officialVideo","exact")
+    data.selection = data.selection.replace("officialLyricVideo","exact")
+    data = data.reset_index(drop=True)
+
+    X = pd.get_dummies(data[[
+        "searchIndex", "spotExplicit", "spotDurationMs", "ytChannelSubscriberCount",
+        "ytChannelViewCount", "ytCommentCount", "ytDislikeCount", "ytFavoriteCount",
+        "ytLicensedContent", "ytLikeCount", "ytViewCount",
+        "ytDefinition", "ytCaption", "ytChannelId", "containsArtist", "containsAlbum", "containsTrack"
+    ]])
+
+    y_factorization = pd.factorize(data.selection)
+    y = y_factorization[0]
+
+    full_vectorizer = create_vectorizer()
+    full_vectorizer.fit(data.ytDescription).fit(data.ytTitle)
+
+    description_bag = full_vectorizer.transform(data.ytDescription)
+    description_bag_sdf = pd.SparseDataFrame(description_bag, columns=full_vectorizer.get_feature_names(), default_fill_value=0)
+
+    title_bag = full_vectorizer.transform(data.ytTitle)
+    title_bag_sdf = pd.SparseDataFrame(title_bag, columns=full_vectorizer.get_feature_names(), default_fill_value=0)
+
+    X = pd.concat([X, description_bag_sdf, title_bag_sdf], axis=1)
+
+    models = [
+        RandomForestClassifier(n_estimators=200, max_depth=3),
+        LinearSVC(),
+        MultinomialNB(),
+        LogisticRegression(),
+        XGBClassifier()
+    ]
+
+    for model in models:
+        confusion, scores = cross_validate(model, X, y, y_factorization)
+
+    return (data, X, y, confusion, scores)
+
+data, X, y, confusion, scores = main()
