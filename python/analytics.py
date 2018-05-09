@@ -8,8 +8,8 @@ from xgboost import XGBClassifier
 from sklearn.preprocessing import Imputer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import cross_val_score, cross_val_predict
-from sklearn.metrics import confusion_matrix, recall_score, precision_score, f1_score
+from sklearn.model_selection import cross_val_predict
+from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
@@ -93,26 +93,10 @@ def format_doc(doc):
 def create_vectorizer():
     return TfidfVectorizer(analyzer = "word",   \
                             stop_words = "english",   \
-                            max_features = 1000,
-                            ngram_range=(1,2),
-                            min_df=5,
-                            sublinear_tf=True)
+                            max_features = 2000,
+                            ngram_range=(1,3),
+                            min_df=5)
 
-
-def get_scores(confusion, y, y_pred, y_factorization):
-    df = pd.DataFrame({
-        "recall": confusion.apply(lambda x: x[x.name] / x.sum(), axis=1),
-        "precision": confusion.apply(lambda x: x[x.name] / x.sum())
-    }).rename_axis(None)
-
-    df.index = [ y_factorization[1][x] for x in df.index ]
-
-    df.loc["totals"] = [
-        recall_score(y, y_pred, average="micro"),
-        precision_score(y, y_pred, average="micro"),
-    ]
-
-    return df
 
 def cross_validate(classifier, X, y, y_factorization):
     print(classifier.__class__.__name__)
@@ -123,13 +107,11 @@ def cross_validate(classifier, X, y, y_factorization):
     confusion = pd.DataFrame(confusion_matrix(y, y_pred))
     confusion = confusion.rename_axis("actual", axis="rows").rename_axis("predicted", axis="columns")
 
-    scores = get_scores(confusion, y, y_pred, y_factorization)
-
     print(confusion)
-    print(scores)
+    print(classification_report(y, y_pred, target_names=y_factorization[1]))
     print()
 
-    return (confusion, scores)
+    return confusion
 
 def main():
     data = get_data()
@@ -186,8 +168,8 @@ def main():
     ]
 
     for model in models:
-        confusion, scores = cross_validate(model, X, y, y_factorization)
+        confusion = cross_validate(model, X, y, y_factorization)
 
-    return (data, X, y, confusion, scores)
+    return (data, X, y, confusion)
 
-data, X, y, confusion, scores = main()
+data, X, y, confusion = main()
