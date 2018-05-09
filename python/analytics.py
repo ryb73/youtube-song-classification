@@ -3,7 +3,7 @@ import jsoncfg
 import os
 import pandas as pd
 from bs4 import BeautifulSoup
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from xgboost import XGBClassifier
 from sklearn.preprocessing import Imputer
 from sklearn.ensemble import RandomForestClassifier
@@ -91,10 +91,12 @@ def format_doc(doc):
     }
 
 def create_vectorizer():
-    return CountVectorizer(analyzer = "word",   \
+    return TfidfVectorizer(analyzer = "word",   \
                             stop_words = "english",   \
                             max_features = 1000,
-                            ngram_range=(1,2))
+                            ngram_range=(1,2),
+                            min_df=5,
+                            sublinear_tf=True)
 
 
 def get_scores(confusion, y, y_pred, y_factorization):
