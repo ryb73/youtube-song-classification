@@ -46,6 +46,15 @@ def get_data():
          "containsAlbum": row["spotAlbumName"] in (row["ytTitle"] + " " + row["ytDescription"]),
          "containsTrack": row["spotTrackName"] in (row["ytTitle"] + " " + row["ytDescription"]),
          } for row in data]
+
+    # ideas
+    # ard distance from vid upload date
+    # y/m/d presensce in description
+    # spotify duration distance from vid dur
+    # album release date (ard) – clean year-only dates or drop date
+    # missing values
+    # categorize: ytCategoryId
+
     return pd.DataFrame(data)
 
 

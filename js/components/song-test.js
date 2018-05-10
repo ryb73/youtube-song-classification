@@ -5,7 +5,9 @@ import classNames from "classnames";
 import update from "immutability-helper";
 import { getYouTubeChannels, saveYouTubeChannels, getVideos, saveVideos, getMatchTypes, setSelections, addMatchTypes } from "../api-helper";
 
-export default class SongText extends React.Component {
+const nullMatch = "none";
+
+export default class SongTest extends React.Component {
     constructor(props) {
         super(props);
         autobind(this);
@@ -16,7 +18,7 @@ export default class SongText extends React.Component {
             videoDetails: null,
             vidMeta: {},
             toggledVideo: null,
-            selections: {},
+            attributes: {},
             matchTypes: null,
             progress: null
         };
@@ -59,14 +61,13 @@ export default class SongText extends React.Component {
     }
 
     renderVideoList() {
-        let { videoDetails, toggledVideo, channelDetails } = this.state;
+        let { videoDetails, toggledVideo, channelDetails, attributes } = this.state;
 
         return _.map(videoDetails, (video) => {
             let toggled = video.id === toggledVideo;
             let className = classNames({
                 toggled,
-                untoggled: !toggled,
-                match: this.getSelectionValue(this.state.selections[video.id])
+                match: this.isMatchSelected(attributes[video.id])
             });
 
             let { description, channelId } = video.snippet;
@@ -88,33 +89,109 @@ export default class SongText extends React.Component {
                     <p className="description">{description}</p>
                     <p><strong>Channel:</strong> {channelName}</p>
                     {player}
-                    {this.renderSelection(video.id)}
+                    {this.renderAttributes(video.id)}
                 </li>
             );
         });
     }
 
-    renderSelection(videoId) {
+    isMatchSelected(attributes) {
+        if(!attributes)
+            return false;
+
+        if(attributes.matchKind === nullMatch)
+            return false;
+
+        if(attributes.matchKind === "related")
+            return true;
+
+        return !!this.getMatchTypeValue(attributes);
+    }
+
+    renderAttributes(videoId) {
+        let attributes = this.state.attributes[videoId] || { matchKind: nullMatch };
+        let { matchKind } = attributes;
+
+        return (
+            <form className="selector">
+                {this.renderBooleanAttributes(videoId)}
+                <label>
+                    <input type="radio" name="matchKind" value="none" checked={!matchKind || matchKind === nullMatch} onChange={this.setMatchKind.bind(this, videoId)} />
+                    None
+                </label>
+                <label>
+                    <input type="radio" name="matchKind" value="exact" checked={matchKind === "exact"} onChange={this.setMatchKind.bind(this, videoId)} />
+                    Exact
+                </label>
+                <label>
+                    <input type="radio" name="matchKind" value="alternate" checked={matchKind === "alternate"} onChange={this.setMatchKind.bind(this, videoId)} />
+                    Alternate
+                </label>
+                <label>
+                    <input type="radio" name="matchKind" value="related" checked={matchKind === "related"} onChange={this.setMatchKind.bind(this, videoId)} />
+                    Related
+                </label>
+                {this.renderMatchTypeSelection(matchKind, videoId)}
+            </form>
+        );
+    }
+
+    renderBooleanAttributes(videoId) {
+        let { audioOnly, hq } = this.getAttributes(videoId);
+        return (
+            <div>
+                <label>
+                    <input type="checkbox" checked={audioOnly} onClick={this.checkboxClicked.bind(this, "audioOnly", videoId)} />
+                    Audio Only
+                </label>
+                <label>
+                    <input type="checkbox" checked={hq} onClick={this.checkboxClicked.bind(this, "hq", videoId)} />
+                    HQ
+                </label>
+            </div>
+        );
+    }
+
+    getAttributes(videoId) {
+        let { attributes } = this.state;
+        return attributes[videoId] || { matchKind: nullMatch };
+    }
+
+    checkboxClicked(which, videoId, e) {
+        // TODO: clean up
+        let { attributes } = this.state;
+        if(!attributes[videoId])
+            attributes[videoId] = { matchKind: nullMatch };
+
+        this.setState(update(attributes, {
+            [videoId]: { [which]: { $set: e.target.checked }}
+        }));
+    }
+
+    renderMatchTypeSelection(matchKind, videoId) {
         if(!this.state.matchTypes)
             return <i className="fa fa-spinner fa-pulse selector" />;
 
-        let options = this.state.matchTypes.map(({ id, name }) =>
+        let matchTypes = this.state.matchTypes[matchKind];
+        if(!matchTypes)
+            return null;
+
+        let options = matchTypes.map(({ id, name }) =>
             <option value={id} key={id}>{name}</option>
         );
 
-        let selection = this.state.selections[videoId] || {id:""};
+        let { matchType, otherValue } = this.state.attributes[videoId];
 
         let otherInput;
-        if(selection.id === "other")
-            otherInput = <input type="text" value={selection.otherValue}
+        if(matchType === "other")
+            otherInput = <input type="text" value={otherValue}
                                 onChange={this.otherValueChanged.bind(this, videoId)}
                                 ref={this.otherInputMounted} />;
 
         return (
-            <div className="selector">
+            <div>
                 {otherInput}
-                <select className="selector" value={selection.id} onChange={this.setSelection.bind(this, videoId)}>
-                    <option value="">No Match</option>
+                <select value={matchType} onChange={this.setMatchType.bind(this, videoId)}>
                     {options}
                     <option value="other">Other</option>
                 </select>
@@ -129,7 +206,7 @@ export default class SongText extends React.Component {
 
     otherValueChanged(videoId, e) {
         this.setState({
-            selections: update(this.state.selections, {
+            attributes: update(this.state.attributes, {
                 [videoId]: { otherValue: {
                     $set: e.target.value
                 }}
@@ -137,10 +214,21 @@ export default class SongText extends React.Component {
         });
     }
 
-    setSelection(videoId, e) {
+    setMatchType(videoId, e) {
         this.setState({
-            selections: update(this.state.selections, {
-                [videoId]: { $set: { id: e.target.value, otherValue: "" } }
+            attributes: update(this.state.attributes, {
+                [videoId]: {
+                    matchType: { $set: e.target.value },
+                    otherValue: { $set: "" }
+                }
+            })
+        });
+    }
+
+    setMatchKind(videoId, e) {
+        this.setState({
+            attributes: update(this.state.attributes, {
+                [videoId]: { $set: { matchKind: e.target.value, matchType: "other", otherValue: "" } }
             })
         });
     }
@@ -178,7 +266,7 @@ export default class SongText extends React.Component {
         this.setState({
             track, videoDetails, vidMeta,
             channelDetails: await this.getChannelDetails(channelIds),
-            selections: {},
+            attributes: {},
             progress: track.progress,
             toggledVideo: null,
         });
@@ -226,29 +314,31 @@ export default class SongText extends React.Component {
         });
     }
 
-    getSelectionValue(selection) {
-        if(!selection)
+    getMatchTypeValue(attribute) {
+        if(!attribute)
             return null;
 
-        if(selection.id === "other")
-            return selection.otherValue;
+        if(attribute.matchType === "other")
+            return attribute.otherValue;
 
-        return selection.id;
+        return attribute.matchType;
     }
 
     nextSong() {
-        let { selections, videoDetails, track, vidMeta } = this.state;
+        let { attributes, videoDetails, track, vidMeta } = this.state;
 
         for(let videoId in videoDetails) {
-            selections[videoId] = selections[videoId] || {id:""};
+            attributes[videoId] = attributes[videoId] || { matchKind: nullMatch };
         }
 
         this.saveOthers();
 
-        let selectionValues = _.map(selections, (selection, videoId) => {
+        let selectionValues = _.map(attributes, (attribute, videoId) => {
             return {
+                version: 2,
                 videoId,
-                value: this.getSelectionValue(selection),
+                matchType: this.getMatchTypeValue(attribute),
+                matchKind: attribute.matchKind,
                 vidMeta: vidMeta[videoId]
             };
         });
@@ -259,22 +349,24 @@ export default class SongText extends React.Component {
     }
 
     saveOthers() {
-        let { selections, matchTypes } = this.state;
+        let { attributes } = this.state;
 
-        let others = _(selections)
-            .map("otherValue")
-            .filter()
-            .value();
-
+        let others = _.filter(attributes, ({ otherValue }) => !!otherValue);
         if(!others)
             return;
 
-        let otherTypes = others.map(v => { return { id: v, name: v }; });
+        let otherTypes = others.map(({ otherValue, matchKind }) => {
+            return {
+                id: otherValue,
+                name: otherValue,
+                kind: matchKind
+            };
+        });
 
         addMatchTypes(otherTypes);
 
-        this.setState({
-            matchTypes: matchTypes.concat(otherTypes)
-        });
+        // this.setState({
+        //     matchTypes: _.uniq(matchTypes.concat(otherTypes))
+        // });
     }
 }

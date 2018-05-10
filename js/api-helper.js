@@ -32,7 +32,15 @@ export async function getVideos(videoIds) {
 
 export async function getMatchTypes() {
     let { body } = await superagent.get(getApiUrlBase() + "/get-match-types/");
-    return body;
+
+    let result = {};
+    for(let matchType of body) {
+        if(!result[matchType.kind])
+            result[matchType.kind] = [];
+        result[matchType.kind].push(matchType);
+    }
+
+    return result;
 }
 
 export async function setSelections(searchId, selections) {
