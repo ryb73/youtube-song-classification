@@ -54,6 +54,7 @@ def get_data():
     # album release date (ard) – clean year-only dates or drop date
     # missing values
     # categorize: ytCategoryId
+    # record label matching to yt channel
 
     return pd.DataFrame(data)
 

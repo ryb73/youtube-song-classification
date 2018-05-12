@@ -109,7 +109,7 @@ export default class SongTest extends React.Component {
     }
 
     renderAttributes(videoId) {
-        let attributes = this.state.attributes[videoId] || { matchKind: nullMatch };
+        let attributes = this.state.attributes[videoId] || this.createEmptyAttributes();
         let { matchKind } = attributes;
 
         return (
@@ -141,11 +141,11 @@ export default class SongTest extends React.Component {
         return (
             <div>
                 <label>
-                    <input type="checkbox" checked={audioOnly} onClick={this.checkboxClicked.bind(this, "audioOnly", videoId)} />
+                    <input type="checkbox" checked={!!audioOnly} onClick={this.checkboxClicked.bind(this, "audioOnly", videoId)} />
                     Audio Only
                 </label>
                 <label>
-                    <input type="checkbox" checked={hq} onClick={this.checkboxClicked.bind(this, "hq", videoId)} />
+                    <input type="checkbox" checked={!!hq} onClick={this.checkboxClicked.bind(this, "hq", videoId)} />
                     HQ
                 </label>
             </div>
@@ -154,18 +154,23 @@ export default class SongTest extends React.Component {
 
     getAttributes(videoId) {
         let { attributes } = this.state;
-        return attributes[videoId] || { matchKind: nullMatch };
+        return attributes[videoId] || this.createEmptyAttributes();
     }
 
     checkboxClicked(which, videoId, e) {
         // TODO: clean up
         let { attributes } = this.state;
         if(!attributes[videoId])
-            attributes[videoId] = { matchKind: nullMatch };
+            attributes[videoId] = this.createEmptyAttributes();
 
-        this.setState(update(attributes, {
-            [videoId]: { [which]: { $set: e.target.checked }}
-        }));
+        let updateParams = {
+            [videoId]: { [which]: { $set: e.target.checked } }
+        };
+
+        if(which === "audioOnly" && attributes[videoId].matchKind === "exact" && e.target.checked)
+            updateParams[videoId].matchType = { $set: "audioOnly" };
+
+        this.setState({ attributes: update(attributes, updateParams) });
     }
 
     renderMatchTypeSelection(matchKind, videoId) {
@@ -226,11 +231,24 @@ export default class SongTest extends React.Component {
     }
 
     setMatchKind(videoId, e) {
+        let { attributes } = this.state;
+
+        if(!attributes[videoId])
+            attributes[videoId] = this.createEmptyAttributes();
+
         this.setState({
             attributes: update(this.state.attributes, {
-                [videoId]: { $set: { matchKind: e.target.value, matchType: "other", otherValue: "" } }
+                [videoId]: {
+                    matchKind: { $set: e.target.value },
+                    matchType: { $set: "other" },
+                    otherValue: { $set: "" }
+                }
             })
         });
+    }
+
+    createEmptyAttributes() {
+        return { matchKind: nullMatch };
     }
 
     toggleVideo(videoId, e) {
@@ -328,18 +346,20 @@ export default class SongTest extends React.Component {
         let { attributes, videoDetails, track, vidMeta } = this.state;
 
         for(let videoId in videoDetails) {
-            attributes[videoId] = attributes[videoId] || { matchKind: nullMatch };
+            attributes[videoId] = attributes[videoId] || this.createEmptyAttributes();
         }
 
         this.saveOthers();
 
         let selectionValues = _.map(attributes, (attribute, videoId) => {
             return {
+                ...attribute,
+                otherValue: undefined,
+                matchType: this.getMatchTypeValue(attribute),
+
                 version: 2,
                 videoId,
-                matchType: this.getMatchTypeValue(attribute),
-                matchKind: attribute.matchKind,
-                vidMeta: vidMeta[videoId]
+                vidMeta: vidMeta[videoId],
             };
         });
 
@@ -365,8 +385,16 @@ export default class SongTest extends React.Component {
 
         addMatchTypes(otherTypes);
 
-        // this.setState({
-        //     matchTypes: _.uniq(matchTypes.concat(otherTypes))
-        // });
+        let updateParams = {
+            exact: { $push: [] },
+            alternate: { $push: [] }
+        };
+        for(let ot of otherTypes) {
+            updateParams[ot.kind].$push.push(ot);
+        }
+
+        this.setState({
+            matchTypes: update(this.state.matchTypes, updateParams)
+        });
     }
 }
