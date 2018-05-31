@@ -2,7 +2,7 @@ import rethinkdb as r
 import jsoncfg
 import os
 import pandas as pd
-from bs4 import BeautifulSoup
+# from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from xgboost import XGBClassifier
 from sklearn.preprocessing import Imputer
@@ -26,6 +26,7 @@ def connect_db():
 def get_data():
     db = connect_db()
     data = list(r.table("selections")
+                .filter({"version": 2})
                 .eq_join("searchId", r.table("searches"))
                 .eq_join(r.row["left"]["videoId"], r.table("videos"))
                 .eq_join(r.row["right"]["snippet"]["channelId"], r.table("youTubeChannels"))
@@ -66,7 +67,10 @@ def format_doc(doc):
     channel = doc["right"]
     return {
         "selectionId": selection["id"],
-        "selection": selection["value"],
+        "matchKind": selection["matchKind"],
+        "matchType": r.branch(selection.has_fields("matchType"), selection["matchType"], None),
+        "audioOnly": r.branch(selection.has_fields("audioOnly"), selection["audioOnly"], False),
+        "hq": r.branch(selection.has_fields("hq"), selection["hq"], False),
         "searchIndex": r.branch(selection.has_fields("vidMeta"), selection["vidMeta"]["searchIndex"], None),
         "spotArtistName": search["track"]["artists"][0]["name"],
         "spotAlbumName": search["track"]["album"]["name"],
@@ -80,8 +84,8 @@ def format_doc(doc):
         "ytDefinition": video["contentDetails"]["definition"],
         "ytLicensedContent": video["contentDetails"]["licensedContent"],
         "ytCategoryId": video["snippet"]["categoryId"],
-        "ytChannelId": video["snippet"]["channelId"],
-        "ytChannelName": video["snippet"]["channelTitle"],
+        # "ytChannelId": video["snippet"]["channelId"],
+        # "ytChannelName": video["snippet"]["channelTitle"],
         "ytDescription": video["snippet"]["description"],
         "ytPublishTimestamp": video["snippet"]["publishedAt"],
         "ytTitle": video["snippet"]["title"],
@@ -123,40 +127,86 @@ def cross_validate(classifier, X, y, y_factorization):
 
     return confusion
 
-def main():
-    data = get_data()
-    data = data[(data.selection != "mashup") & (data.selection != "instrumental")]
-    data.selection = data.selection.replace("lyricHD","LyricVideo")
-    data.selection = data.selection.replace("proCover","cover")
-    data.selection = data.selection.replace("drumCover","instrumentCover")
-    data.selection = data.selection.replace("pianoCover","instrumentCover")
-    data.selection = data.selection.replace("guitarCover","instrumentCover")
-    data.selection = data.selection.replace("liveAcoustic","live")
-    data.selection = data.selection.replace("liveAcousticHQ","liveInStudio")
-    data.selection = data.selection.replace("cover","alternate")
-    data.selection = data.selection.replace("instrumentCover","related")
-    data.selection = data.selection.replace("remix","alternate")
-    data.selection = data.selection.replace("acoustic","alternate")
-    data.selection = data.selection.replace("liveAudio","live")
-    data.selection = data.selection.replace("liveHD","live")
-    data.selection = data.selection.replace("live","alternate")
-    data.selection = data.selection.replace("liveInStudio","alternate")
-    data.selection = data.selection.replace("LyricVideo","exact")
-    data.selection = data.selection.replace("audioOnly","exact")
-    data.selection = data.selection.replace("fanVideo","exact")
-    data.selection = data.selection.replace("officialVideo","exact")
-    data.selection = data.selection.replace("officialLyricVideo","exact")
-    data = data.reset_index(drop=True)
-
+def kind_model(data, description_bag_sdf, title_bag_sdf):
     X = pd.get_dummies(data[[
         "searchIndex", "spotExplicit", "spotDurationMs", "ytChannelSubscriberCount",
         "ytChannelViewCount", "ytCommentCount", "ytDislikeCount", "ytFavoriteCount",
         "ytLicensedContent", "ytLikeCount", "ytViewCount",
         "ytDefinition", "ytCaption", "ytChannelId", "containsArtist", "containsAlbum", "containsTrack"
     ]])
+    X = pd.concat([X, description_bag_sdf, title_bag_sdf], axis=1)
 
-    y_factorization = pd.factorize(data.selection)
+    y_factorization = pd.factorize(data.matchKind)
     y = y_factorization[0]
+
+    models = [
+        RandomForestClassifier(n_estimators=1000, max_depth=4),
+        LinearSVC(),
+        MultinomialNB(),
+        LogisticRegression(),
+        XGBClassifier()
+    ]
+
+    for model in models:
+        cross_validate(model, X, y, y_factorization)
+
+    return (X, y)
+
+def exact_type_model(data, description_bag_sdf, title_bag_sdf):
+    filtered_data = data[(data["matchKind"] == "exact") &
+        (data["matchType"] != "lyricsOtherLang")]
+
+    filtered_description_bag_sdf = description_bag_sdf.iloc[filtered_data.index.intersection(description_bag_sdf.index)]
+    filtered_title_bag_sdf = title_bag_sdf.iloc[filtered_data.index.intersection(title_bag_sdf.index)]
+
+    X = pd.get_dummies(filtered_data[[
+        "searchIndex", "spotExplicit", "spotDurationMs", "ytChannelSubscriberCount",
+        "ytChannelViewCount", "ytCommentCount", "ytDislikeCount", "ytFavoriteCount",
+        "ytLicensedContent", "ytLikeCount", "ytViewCount",
+        "ytDefinition", "ytCaption", "ytChannelId", "containsArtist", "containsAlbum", "containsTrack"
+    ]])
+    X = pd.concat([X, filtered_description_bag_sdf, filtered_title_bag_sdf], axis=1)
+
+    y_factorization = pd.factorize(filtered_data.matchType)
+    y = y_factorization[0]
+
+    models = [
+        RandomForestClassifier(n_estimators=1000, max_depth=4),
+        LinearSVC(),
+        MultinomialNB(),
+        LogisticRegression(),
+        XGBClassifier()
+    ]
+
+    for model in models:
+        cross_validate(model, X, y, y_factorization)
+
+    return (X, y)
+
+def main():
+    data = get_data()
+    # data = data[(data.selection != "mashup") & (data.selection != "instrumental")]
+    # data.selection = data.selection.replace("lyricHD","LyricVideo")
+    # data.selection = data.selection.replace("proCover","cover")
+    # data.selection = data.selection.replace("drumCover","instrumentCover")
+    # data.selection = data.selection.replace("pianoCover","instrumentCover")
+    # data.selection = data.selection.replace("guitarCover","instrumentCover")
+    # data.selection = data.selection.replace("liveAcoustic","live")
+    # data.selection = data.selection.replace("liveAcousticHQ","liveInStudio")
+    # data.selection = data.selection.replace("cover","alternate")
+    # data.selection = data.selection.replace("instrumentCover","related")
+    # data.selection = data.selection.replace("remix","alternate")
+    # data.selection = data.selection.replace("acoustic","alternate")
+    # data.selection = data.selection.replace("liveAudio","live")
+    # data.selection = data.selection.replace("liveHD","live")
+    # data.selection = data.selection.replace("live","alternate")
+    # data.selection = data.selection.replace("liveInStudio","alternate")
+    # data.selection = data.selection.replace("LyricVideo","exact")
+    # data.selection = data.selection.replace("audioOnly","exact")
+    # data.selection = data.selection.replace("fanVideo","exact")
+    # data.selection = data.selection.replace("officialVideo","exact")
+    # data.selection = data.selection.replace("officialLyricVideo","exact")
+    data = data.reset_index(drop=True)
 
     full_vectorizer = create_vectorizer()
     full_vectorizer.fit(data.ytDescription).fit(data.ytTitle)
@@ -167,19 +217,9 @@ def main():
     title_bag = full_vectorizer.transform(data.ytTitle)
     title_bag_sdf = pd.SparseDataFrame(title_bag, columns=full_vectorizer.get_feature_names(), default_fill_value=0)
 
-    X = pd.concat([X, description_bag_sdf, title_bag_sdf], axis=1)
+    # kind_model(data, description_bag_sdf, title_bag_sdf)
+    exact_type_model(data, description_bag_sdf, title_bag_sdf)
 
-    models = [
-        RandomForestClassifier(n_estimators=200, max_depth=3),
-        LinearSVC(),
-        MultinomialNB(),
-        LogisticRegression(),
-        XGBClassifier()
-    ]
+    return data, description_bag_sdf, title_bag_sdf
 
-    for model in models:
-        confusion = cross_validate(model, X, y, y_factorization)
-
-    return (data, X, y, confusion)
-
-data, X, y, confusion = main()
+data, description_bag_sdf, title_bag_sdf = main()
