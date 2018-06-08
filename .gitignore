@@ -45,3 +45,5 @@ config/production.*
 config/local.*
 
 config.json
+
+python/out.csv

@@ -1,7 +1,10 @@
 import rethinkdb as r
 import jsoncfg
 import os
+import re
 import pandas as pd
+import numpy as np
+from math import log
 # from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from xgboost import XGBClassifier
@@ -13,6 +16,7 @@ from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
+import matplotlib.pyplot as plt
 
 fp = __file__
 
@@ -35,18 +39,24 @@ def get_data():
 
     data = [
         {**row,
-         "ytChannelSubscriberCount": int(row["ytChannelSubscriberCount"]) if row["ytChannelSubscriberCount"] is not None else None,
-         "ytChannelCommentCount": int(row["ytChannelCommentCount"]) if row["ytChannelCommentCount"] is not None else None,
-         "ytChannelViewCount": int(row["ytChannelViewCount"]) if row["ytChannelViewCount"] is not None else None,
-         "ytCommentCount": int(row["ytCommentCount"]) if row["ytCommentCount"] is not None else None,
-         "ytDislikeCount": int(row["ytDislikeCount"]) if row["ytDislikeCount"] is not None else None,
-         "ytFavoriteCount": int(row["ytFavoriteCount"]) if row["ytFavoriteCount"] is not None else None,
-         "ytLikeCount": int(row["ytLikeCount"]) if row["ytLikeCount"] is not None else None,
-         "ytViewCount": int(row["ytViewCount"]) if row["ytViewCount"] is not None else None,
-         "containsArtist": row["spotArtistName"] in (row["ytTitle"] + " " + row["ytDescription"]),
-         "containsAlbum": row["spotAlbumName"] in (row["ytTitle"] + " " + row["ytDescription"]),
-         "containsTrack": row["spotTrackName"] in (row["ytTitle"] + " " + row["ytDescription"]),
-         } for row in data]
+            "ytChannelSubscriberCount": try_log(int(row["ytChannelSubscriberCount"])) if row["ytChannelSubscriberCount"] is not None else None,
+            # "ytChannelCommentCount": try_log(int(row["ytChannelCommentCount"])) if row["ytChannelCommentCount"] is not None else None,
+            "ytChannelViewCount": try_log(int(row["ytChannelViewCount"])) if row["ytChannelViewCount"] is not None else None,
+            "ytCommentCount": try_log(int(row["ytCommentCount"])) if row["ytCommentCount"] is not None else None,
+            "ytDislikeCount": try_log(int(row["ytDislikeCount"])) if row["ytDislikeCount"] is not None else None,
+            # "ytFavoriteCount": try_log(int(row["ytFavoriteCount"])) if row["ytFavoriteCount"] is not None else None,
+            "ytLikeCount": try_log(int(row["ytLikeCount"])) if row["ytLikeCount"] is not None else None,
+            "ytViewCount": try_log(int(row["ytViewCount"])) if row["ytViewCount"] is not None else None,
+            # "containsArtist": row["spotArtistName"] in (row["ytTitle"] + " " + row["ytDescription"]),
+            # "containsAlbum": row["spotAlbumName"] in (row["ytTitle"] + " " + row["ytDescription"]),
+            # "containsTrack": row["spotTrackName"] in (row["ytTitle"] + " " + row["ytDescription"]),
+            "ytDescription": tokenize_dynamic_names(row, row["ytDescription"]),
+            "ytTitle": tokenize_dynamic_names(row, row["ytTitle"]),
+            # "ytChannelName": tokenize_dynamic_names(row, row["ytChannelName"], True),
+            "ytChannelDescription": tokenize_dynamic_names(row, row["ytChannelDescription"]),
+            "ytTags": tokenize_dynamic_names(row, ", ".join(row["ytTags"])),
+            "isVevo": "VEVO" in row["ytChannelName"].upper(),
+        } for row in data]
 
     # ideas
     # ard distance from vid upload date
@@ -59,6 +69,31 @@ def get_data():
 
     return pd.DataFrame(data)
 
+def try_log(n):
+    if n == 0:
+        return 0
+    return log(n)
+
+def tokenize_dynamic_names(row, text, no_spaces=False):
+    spotTrackName = row["spotTrackName"]
+    if no_spaces:
+        spotTrackName = spotTrackName.replace(" ", "")
+    regex = re.compile(re.escape(spotTrackName), re.IGNORECASE)
+    text = regex.sub("<tokenTrackName>", text)
+
+    spotArtistName = row["spotArtistName"]
+    if no_spaces:
+        spotArtistName = spotArtistName.replace(" ", "")
+    regex = re.compile(re.escape(spotArtistName), re.IGNORECASE)
+    text = regex.sub("<tokenArtistName>", text)
+
+    spotAlbumName = row["spotAlbumName"]
+    if no_spaces:
+        spotAlbumName = spotAlbumName.replace(" ", "")
+    regex = re.compile(re.escape(spotAlbumName), re.IGNORECASE)
+    text = regex.sub("<tokenAlbumName>", text)
+
+    return text
 
 def format_doc(doc):
     selection = doc["left"]["left"]["left"]
@@ -84,8 +119,8 @@ def format_doc(doc):
         "ytDefinition": video["contentDetails"]["definition"],
         "ytLicensedContent": video["contentDetails"]["licensedContent"],
         "ytCategoryId": video["snippet"]["categoryId"],
-        # "ytChannelId": video["snippet"]["channelId"],
-        # "ytChannelName": video["snippet"]["channelTitle"],
+        "ytChannelId": video["snippet"]["channelId"],
+        "ytChannelName": video["snippet"]["channelTitle"],
         "ytDescription": video["snippet"]["description"],
         "ytPublishTimestamp": video["snippet"]["publishedAt"],
         "ytTitle": video["snippet"]["title"],
@@ -125,63 +160,73 @@ def cross_validate(classifier, X, y, y_factorization):
     print(classification_report(y, y_pred, target_names=y_factorization[1]))
     print()
 
-    return confusion
+    return confusion, y_pred
 
-def kind_model(data, description_bag_sdf, title_bag_sdf):
+def kind_model(data, bags):
     X = pd.get_dummies(data[[
         "searchIndex", "spotExplicit", "spotDurationMs", "ytChannelSubscriberCount",
         "ytChannelViewCount", "ytCommentCount", "ytDislikeCount", "ytFavoriteCount",
         "ytLicensedContent", "ytLikeCount", "ytViewCount",
-        "ytDefinition", "ytCaption", "ytChannelId", "containsArtist", "containsAlbum", "containsTrack"
+        "ytDefinition", "ytCaption", #"ytChannelId", # "containsArtist", "containsAlbum", "containsTrack"
     ]])
-    X = pd.concat([X, description_bag_sdf, title_bag_sdf], axis=1)
+    X = pd.concat([ X.to_sparse(), *bags ], axis=1)
 
     y_factorization = pd.factorize(data.matchKind)
     y = y_factorization[0]
 
-    models = [
-        RandomForestClassifier(n_estimators=1000, max_depth=4),
-        LinearSVC(),
-        MultinomialNB(),
-        LogisticRegression(),
-        XGBClassifier()
-    ]
+    return run_models(X, y, y_factorization)
 
-    for model in models:
-        cross_validate(model, X, y, y_factorization)
-
-    return (X, y)
-
-def exact_type_model(data, description_bag_sdf, title_bag_sdf):
+def exact_type_model(data, bags):
     filtered_data = data[(data["matchKind"] == "exact") &
         (data["matchType"] != "lyricsOtherLang")]
 
-    filtered_description_bag_sdf = description_bag_sdf.iloc[filtered_data.index.intersection(description_bag_sdf.index)]
-    filtered_title_bag_sdf = title_bag_sdf.iloc[filtered_data.index.intersection(title_bag_sdf.index)]
+    filtered_data = filtered_data.reset_index(drop=True)
+    non_audio = filtered_data[filtered_data["matchType"] != "audioOnly"].index
+    audio = np.random.choice(filtered_data[filtered_data["matchType"] == "audioOnly"].index, 70, replace=False)
+    filtered_data = pd.concat([ filtered_data.iloc[non_audio], filtered_data.iloc[audio] ])
+    filtered_data = filtered_data.reset_index(drop=True)
+
+    filtered_bags = [ sdf.iloc[filtered_data.index.intersection(sdf.index)] for sdf in bags ]
 
     X = pd.get_dummies(filtered_data[[
         "searchIndex", "spotExplicit", "spotDurationMs", "ytChannelSubscriberCount",
         "ytChannelViewCount", "ytCommentCount", "ytDislikeCount", "ytFavoriteCount",
         "ytLicensedContent", "ytLikeCount", "ytViewCount",
-        "ytDefinition", "ytCaption", "ytChannelId", "containsArtist", "containsAlbum", "containsTrack"
+        "ytDefinition", "ytCaption", #"ytChannelId", # "containsArtist", "containsAlbum", "containsTrack"
     ]])
-    X = pd.concat([X, filtered_description_bag_sdf, filtered_title_bag_sdf], axis=1)
+    X = pd.concat([X.to_sparse(), *filtered_bags ], axis=1)
 
     y_factorization = pd.factorize(filtered_data.matchType)
     y = y_factorization[0]
 
+    results = run_models(X, y, y_factorization)
+    results["combined"] = pd.concat([
+        filtered_data.to_sparse(),
+        X,
+        pd.DataFrame(y, columns=["y"]).to_sparse(),
+        pd.DataFrame(results["prediction"], columns=["prediction"]).to_sparse()
+    ], axis=1)
+
+    return results
+
+def run_models(X, y, y_factorization):
     models = [
-        RandomForestClassifier(n_estimators=1000, max_depth=4),
-        LinearSVC(),
-        MultinomialNB(),
-        LogisticRegression(),
+        # RandomForestClassifier(n_estimators=1000, max_depth=4),
+        # LinearSVC(),
+        # MultinomialNB(),
+        # LogisticRegression(),
         XGBClassifier()
     ]
 
     for model in models:
-        cross_validate(model, X, y, y_factorization)
+        confusion, prediction = cross_validate(model, X, y, y_factorization)
 
-    return (X, y)
+    return {
+        "X": X,
+        "y": y,
+        "confusion": confusion,
+        "prediction": prediction
+    }
 
 def main():
     data = get_data()
@@ -206,20 +251,37 @@ def main():
     # data.selection = data.selection.replace("fanVideo","exact")
     # data.selection = data.selection.replace("officialVideo","exact")
     # data.selection = data.selection.replace("officialLyricVideo","exact")
+    data = data[data["matchKind"] != "related"]
     data = data.reset_index(drop=True)
 
     full_vectorizer = create_vectorizer()
-    full_vectorizer.fit(data.ytDescription).fit(data.ytTitle)
+    full_vectorizer\
+        .fit(data.ytDescription)\
+        .fit(data.ytTitle)\
+        .fit(data.ytChannelDescription)\
+        .fit(data.ytTags)
 
-    description_bag = full_vectorizer.transform(data.ytDescription)
-    description_bag_sdf = pd.SparseDataFrame(description_bag, columns=full_vectorizer.get_feature_names(), default_fill_value=0)
+    bags = [
+        vectorize(full_vectorizer, data.ytDescription, "descBag"),
+        vectorize(full_vectorizer, data.ytTitle, "titleBag"),
+        vectorize(full_vectorizer, data.ytChannelDescription, "chanDescBag"),
+        vectorize(full_vectorizer, data.ytTags, "tagsBag"),
+    ]
 
-    title_bag = full_vectorizer.transform(data.ytTitle)
-    title_bag_sdf = pd.SparseDataFrame(title_bag, columns=full_vectorizer.get_feature_names(), default_fill_value=0)
+    results = {}
+    results["kind"] = kind_model(data, bags)
+    results["typeExact"] = exact_type_model(data, bags)
 
-    # kind_model(data, description_bag_sdf, title_bag_sdf)
-    exact_type_model(data, description_bag_sdf, title_bag_sdf)
+    return data, results
 
-    return data, description_bag_sdf, title_bag_sdf
+def vectorize(vectorizer, column, column_name):
+    bag = vectorizer.transform(column)
+    return pd.SparseDataFrame(bag, columns=[ column_name + " " + name for name in vectorizer.get_feature_names() ], default_fill_value=0)
 
-data, description_bag_sdf, title_bag_sdf = main()
+data, results = main()
+
+comb = results["typeExact"]["combined"]
+comb = comb.loc[:,~comb.columns.duplicated()]
+comb[(comb["matchType"] == "officialVideo") & (comb["prediction"] != 2)].to_dense().to_csv("out.csv", encoding='utf-8')
+
+# pd.DataFrame({k: v for k, v in comb.groupby('matchType').ytChannelViewCount}).plot.hist(stacked=True)
