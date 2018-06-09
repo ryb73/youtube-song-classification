@@ -5,21 +5,92 @@ import re
 import pandas as pd
 import numpy as np
 from math import log
+from functools import partial
 # from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from xgboost import XGBClassifier
 from sklearn.preprocessing import Imputer
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.pipeline import make_pipeline
-from sklearn.model_selection import cross_val_predict
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import cross_val_predict, learning_curve
 from sklearn.metrics import confusion_matrix, classification_report
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 fp = __file__
 
+
+def plot_learning_curve(estimator, X, y, title="Learning Curve", ylim=None, cv=None,
+                        n_jobs=1, train_sizes=np.linspace(.1, 1.0, 5)):
+    """
+    Generate a simple plot of the test and training learning curve.
+
+    Parameters
+    ----------
+    estimator : object type that implements the "fit" and "predict" methods
+        An object of that type which is cloned for each validation.
+
+    title : string
+        Title for the chart.
+
+    X : array-like, shape (n_samples, n_features)
+        Training vector, where n_samples is the number of samples and
+        n_features is the number of features.
+
+    y : array-like, shape (n_samples) or (n_samples, n_features), optional
+        Target relative to X for classification or regression;
+        None for unsupervised learning.
+
+    ylim : tuple, shape (ymin, ymax), optional
+        Defines minimum and maximum yvalues plotted.
+
+    cv : int, cross-validation generator or an iterable, optional
+        Determines the cross-validation splitting strategy.
+        Possible inputs for cv are:
+          - None, to use the default 3-fold cross-validation,
+          - integer, to specify the number of folds.
+          - An object to be used as a cross-validation generator.
+          - An iterable yielding train/test splits.
+
+        For integer/None inputs, if ``y`` is binary or multiclass,
+        :class:`StratifiedKFold` used. If the estimator is not a classifier
+        or if ``y`` is neither binary nor multiclass, :class:`KFold` is used.
+
+        Refer :ref:`User Guide <cross_validation>` for the various
+        cross-validators that can be used here.
+
+    n_jobs : integer, optional
+        Number of jobs to run in parallel (default 1).
+    """
+    plt.figure()
+    plt.title(title)
+    if ylim is not None:
+        plt.ylim(*ylim)
+    plt.xlabel("Training examples")
+    plt.ylabel("Score")
+    train_sizes, train_scores, test_scores = learning_curve(
+        estimator, X, y, cv=cv, n_jobs=n_jobs, train_sizes=train_sizes, scoring="f1")
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+    test_scores_std = np.std(test_scores, axis=1)
+    plt.grid()
+
+    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.1,
+                     color="r")
+    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.1, color="g")
+    plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
+             label="Training score")
+    plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
+             label="Cross-validation score")
+
+    plt.legend(loc="best")
+    return plt
 
 def connect_db():
     config = jsoncfg.load_config(os.path.join(
@@ -47,14 +118,22 @@ def get_data():
             # "ytFavoriteCount": try_log(int(row["ytFavoriteCount"])) if row["ytFavoriteCount"] is not None else None,
             "ytLikeCount": try_log(int(row["ytLikeCount"])) if row["ytLikeCount"] is not None else None,
             "ytViewCount": try_log(int(row["ytViewCount"])) if row["ytViewCount"] is not None else None,
+
             # "containsArtist": row["spotArtistName"] in (row["ytTitle"] + " " + row["ytDescription"]),
             # "containsAlbum": row["spotAlbumName"] in (row["ytTitle"] + " " + row["ytDescription"]),
             # "containsTrack": row["spotTrackName"] in (row["ytTitle"] + " " + row["ytDescription"]),
+
             "ytDescription": tokenize_dynamic_names(row, row["ytDescription"]),
+            "ytDescriptionLen": len(row["ytDescription"]),
+            "ytDescriptionLines": row["ytDescription"].count("\n"),
+
             "ytTitle": tokenize_dynamic_names(row, row["ytTitle"]),
+
             # "ytChannelName": tokenize_dynamic_names(row, row["ytChannelName"], True),
             "ytChannelDescription": tokenize_dynamic_names(row, row["ytChannelDescription"]),
+
             "ytTags": tokenize_dynamic_names(row, ", ".join(row["ytTags"])),
+
             "isVevo": "VEVO" in row["ytChannelName"].upper(),
         } for row in data]
 
@@ -140,18 +219,18 @@ def format_doc(doc):
     }
 
 def create_vectorizer():
-    return TfidfVectorizer(analyzer = "word",   \
-                            stop_words = "english",   \
+    return TfidfVectorizer(analyzer = "word",
+                            # stop_words = "english",
                             max_features = 2000,
                             ngram_range=(1,3),
                             min_df=5)
 
 
-def cross_validate(classifier, X, y, y_factorization):
-    print(classifier.__class__.__name__)
+def cross_validate(model, X, y, y_factorization):
+    print(model.__class__.__name__)
 
-    my_pipeline = make_pipeline(Imputer(), classifier)
-    y_pred = cross_val_predict(my_pipeline, X, y)
+    y_pred = cross_val_predict(pipeline(model), X, y)
+    # y_pred = cross_val_predict(pipeline(model), X, y, fit_params={ "main__early_stopping_rounds": 10 })
 
     confusion = pd.DataFrame(confusion_matrix(y, y_pred))
     confusion = confusion.rename_axis("actual", axis="rows").rename_axis("predicted", axis="columns")
@@ -161,6 +240,12 @@ def cross_validate(classifier, X, y, y_factorization):
     print()
 
     return confusion, y_pred
+
+def pipeline(model):
+    return Pipeline([
+        ("imputer", Imputer()),
+        ("main", model)
+    ])
 
 def kind_model(data, bags):
     X = pd.get_dummies(data[[
@@ -174,7 +259,22 @@ def kind_model(data, bags):
     y_factorization = pd.factorize(data.matchKind)
     y = y_factorization[0]
 
-    return run_models(X, y, y_factorization)
+    results = run_models(X, y, y_factorization)
+    results["combined"] = pd.concat([
+        data.to_sparse(),
+        X,
+        pd.DataFrame(y, columns=["y"]).to_sparse(),
+        pd.DataFrame(results["prediction"], columns=["prediction"]).to_sparse()
+    ], axis=1)
+
+    print(y_factorization)
+    results["combined"] = results["combined"].loc[:,~results["combined"].columns.duplicated()]
+    results["combined"] = results["combined"].assign(prediction_cat=results["combined"].apply(partial(derp, y_factorization), axis="columns"))
+
+    return results
+
+def derp(y_factorization, row):
+    return y_factorization[1][row["prediction"]]
 
 def exact_type_model(data, bags):
     filtered_data = data[(data["matchKind"] == "exact") &
@@ -207,6 +307,8 @@ def exact_type_model(data, bags):
         pd.DataFrame(results["prediction"], columns=["prediction"]).to_sparse()
     ], axis=1)
 
+    results["combined"] = results["combined"].loc[:,~results["combined"].columns.duplicated()]
+
     return results
 
 def run_models(X, y, y_factorization):
@@ -225,7 +327,8 @@ def run_models(X, y, y_factorization):
         "X": X,
         "y": y,
         "confusion": confusion,
-        "prediction": prediction
+        "prediction": prediction,
+        "model": pipeline(models[-1])
     }
 
 def main():
@@ -270,7 +373,7 @@ def main():
 
     results = {}
     results["kind"] = kind_model(data, bags)
-    results["typeExact"] = exact_type_model(data, bags)
+    # results["typeExact"] = exact_type_model(data, bags)
 
     return data, results
 
@@ -280,8 +383,7 @@ def vectorize(vectorizer, column, column_name):
 
 data, results = main()
 
-comb = results["typeExact"]["combined"]
-comb = comb.loc[:,~comb.columns.duplicated()]
-comb[(comb["matchType"] == "officialVideo") & (comb["prediction"] != 2)].to_dense().to_csv("out.csv", encoding='utf-8')
+kcomb = results["kind"]["combined"]
+kcomb[(kcomb["matchKind"] == "exact") & (kcomb["prediction_cat"] != "exact")].to_dense().to_csv("out.csv", encoding='utf-8')
 
-# pd.DataFrame({k: v for k, v in comb.groupby('matchType').ytChannelViewCount}).plot.hist(stacked=True)
+# pd.DataFrame({k: v for k, v in kcomb.groupby('matchType').ytChannelViewCount}).plot.hist(stacked=True)
