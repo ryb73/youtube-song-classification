@@ -145,6 +145,7 @@ def get_data():
     # missing values
     # categorize: ytCategoryId
     # record label matching to yt channel
+    # song is title track, album is self-titled
 
     return pd.DataFrame(data)
 
@@ -373,7 +374,7 @@ def main():
 
     results = {}
     results["kind"] = kind_model(data, bags)
-    # results["typeExact"] = exact_type_model(data, bags)
+    results["typeExact"] = exact_type_model(data, bags)
 
     return data, results
 
